@@ -824,14 +824,9 @@ function Planner({user}){
           <div style={{flex:1,overflowY:"auto",padding:"8px 14px"}}>
             {(()=>{
               const today=todayKey();
-              const days=todoFilter==="today"?[today]:Object.keys(allData).filter(dk=>{
-                if(todoFilter==="all") return true;
-                return true;
-              }).sort();
               const relevantDays=todoFilter==="today"?[today]:
                 todoFilter==="all"?[...new Set([...Object.keys(allData),today])].sort():
                 [...new Set([...Object.keys(allData),today])].sort();
-
               return relevantDays.map(dk=>{
                 const eff=getEffectiveTasks(dk).filter(t=>!t._cancelled);
                 const allTodos=eff.flatMap(task=>(task.todos||[]).map(td=>({...td,taskName:task.name,taskType:task.type,taskId:task.id,task})));
