@@ -29,7 +29,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
- 
+
 // ─── CONFIG — REPLACE THESE ──────────────────────────────────────────────────
 const SUPABASE_URL      = "https://wojfppyjesmfrwfrndun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvamZwcHlqZXNtZnJ3ZnJuZHVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNjg0MjcsImV4cCI6MjA5MDk0NDQyN30._vY9WY4rNS2iMjK08B4tuNFKfIECBF0iFmvT6s-KgiY";
@@ -276,17 +276,19 @@ function Planner({user}){
   // Load data
   useEffect(()=>{
     async function load(){
+      let loadedDays={}, loadedRec=[];
       try{
         const {days,recurring:rec}=await dbLoad(user.id);
         const local=JSON.parse(localStorage.getItem("smart-planner-v4")||"{}");
         const localRec=JSON.parse(localStorage.getItem("smart-planner-v4-recurring")||"[]");
-        setAllData({...local,...days}); setRecurring(rec.length>0?rec:localRec);
+        loadedDays={...local,...days}; loadedRec=rec.length>0?rec:localRec;
       }catch{
-        setAllData(JSON.parse(localStorage.getItem("smart-planner-v4")||"{}"));
-        setRecurring(JSON.parse(localStorage.getItem("smart-planner-v4-recurring")||"[]"));
+        loadedDays=JSON.parse(localStorage.getItem("smart-planner-v4")||"{}");
+        loadedRec=JSON.parse(localStorage.getItem("smart-planner-v4-recurring")||"[]");
       }
+      setAllData(loadedDays); setRecurring(loadedRec);
       setLoaded(true);
-      scheduleAllReminders(days,rec,getWeekDays(todayKey()));
+      scheduleAllReminders(loadedDays,loadedRec,getWeekDays(todayKey()));
     }
     load();
   },[user.id]);
@@ -472,7 +474,8 @@ function Planner({user}){
           {!notifGranted&&<button onClick={async()=>{const g=await requestNotifPermission();setNotifGranted(g);if(g)scheduleAllReminders(allData,recurring,weekDays);}} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:B,background:"none",color:"#BA7517"}}>Enable reminders</button>}
           {notifGranted&&<span style={{fontSize:11,color:"#1D9E75",padding:"3px 6px"}}>Reminders on</span>}
           <button onClick={()=>setShowRecurring(p=>!p)} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:showRecurring?"1.5px solid #D85A30":B,background:showRecurring?"#FAECE7":"none",color:showRecurring?"#D85A30":"#666"}}>↻ Recurring</button>
-            <button key={v} onClick={()=>setView(v)} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:view===v?"1.5px solid #7F77DD":B,background:view===v?"#EEEDFE":"none",color:view===v?"#3C3489":"#666"}}>{v}</button>
+          {["week","day"].map(vw=>(
+            <button key={vw} onClick={()=>setView(vw)} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:view===vw?"1.5px solid #7F77DD":B,background:view===vw?"#EEEDFE":"none",color:view===vw?"#3C3489":"#666"}}>{vw}</button>
           ))}
           <button onClick={()=>sb.auth.signOut()} style={{fontSize:11,padding:"3px 8px",borderRadius:6,border:B,background:"none",color:"#bbb"}}>Sign out</button>
         </div>
