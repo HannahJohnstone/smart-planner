@@ -335,10 +335,12 @@ function Planner({user}){
 
   function getEffectiveTasks(dk){
     const stored=(dayData(dk).tasks||[]).map(t=>({...t,types:t.types||(t.type?[t.type]:["task"])}));
-    const storedRecurIds=new Set(stored.map(t=>t.repeatId).filter(Boolean));
-    const recTasks=recurring.filter(r=>doesRecurOn(r,dk)&&!storedRecurIds.has(r.id))
+    const cancelledIds=new Set(stored.filter(t=>t._cancelled).map(t=>String(t.repeatId)));
+    const storedRecurIds=new Set(stored.filter(t=>!t._cancelled&&t.repeatId).map(t=>String(t.repeatId)));
+    const recTasks=recurring
+      .filter(r=>doesRecurOn(r,dk)&&!cancelledIds.has(String(r.id))&&!storedRecurIds.has(String(r.id)))
       .map(r=>({...r,types:r.types||(r.type?[r.type]:["task"]),repeatId:r.id,id:r.id+"-"+dk,done:false,todos:parseTodos(r.note),_recurring:true}));
-    return [...recTasks,...stored];
+    return [...recTasks,...stored.filter(t=>!t._cancelled)];
   }
 
   function addTask(){
@@ -349,8 +351,12 @@ function Planner({user}){
     setDraft(mkTask()); setShowAdd(false);
   }
   function removeTask(dk,id,isRec,repeatId){
-    if(isRec){ updateTasks(dk,[...dayData(dk).tasks,{id:Date.now(),repeatId,_cancelled:true,name:"",duration:0,type:"task",done:false,note:"",todos:[],startTime:"00:00"}]); }
-    else { updateTasks(dk,dayData(dk).tasks.filter(t=>t.id!==id)); }
+    if(isRec){
+      updateTasks(dk,[...dayData(dk).tasks.filter(t=>!(t._cancelled&&String(t.repeatId)===String(repeatId))),
+        {id:Date.now(),repeatId:String(repeatId),_cancelled:true,name:"",duration:0,types:["task"],done:false,note:"",todos:[],startTime:"00:00"}]);
+    } else {
+      updateTasks(dk,dayData(dk).tasks.filter(t=>String(t.id)!==String(id)));
+    }
   }
   function removeRecurring(id){ setRec(recurring.filter(r=>r.id!==id)); }
   function toggleDone(dk,task){
