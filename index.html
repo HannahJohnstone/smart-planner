@@ -29,7 +29,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-
+ 
 // ─── CONFIG — REPLACE THESE ──────────────────────────────────────────────────
 const SUPABASE_URL      = "https://wojfppyjesmfrwfrndun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvamZwcHlqZXNtZnJ3ZnJuZHVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNjg0MjcsImV4cCI6MjA5MDk0NDQyN30._vY9WY4rNS2iMjK08B4tuNFKfIECBF0iFmvT6s-KgiY";
@@ -63,6 +63,8 @@ const DAY_START_H      = 7;
 const HOURS            = Array.from({length:17},(_,i)=>i+DAY_START_H);
 const GCAL_COLOR       = "#b0b0b0";
 const REMINDER_OPTIONS = ["none","5 mins","10 mins","15 mins","30 mins","1 hour"];
+const TODO_TAGS = ["urgent","admin","reading","writing","follow-up","waiting","personal","research"];
+const TODO_TAG_COLORS = {urgent:"#A32D2D",admin:"#185FA5",reading:"#0F6E56",writing:"#7F77DD","follow-up":"#D85A30",waiting:"#888780",personal:"#D4537E",research:"#BA7517"};
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 function todayKey(){ return new Date().toISOString().slice(0,10); }
@@ -105,7 +107,7 @@ function getWarnings(tasks,energy){
   return w;
 }
 function parseTodos(note){
-  return (note||"").split("\n").map(l=>l.trim()).filter(Boolean).map((text,i)=>({id:i,text,done:false}));
+  return (note||"").split("\n").map(l=>l.trim()).filter(Boolean).map((text,i)=>({id:i,text,done:false,tag:null}));
 }
 const mkTask=()=>({id:Date.now()+Math.random(),name:"",duration:60,priority:"medium",type:"task",done:false,note:"",todos:[],startTime:"09:00",repeat:"none",repeatDays:[],repeatId:null,repeatStart:"",repeatEnd:"",reminder:"none"});
 
@@ -261,6 +263,8 @@ function Planner({user}){
   const [showTodoPanel,setShowTodoPanel]=useState(false);
   const [notifGranted,setNotifGranted]=useState(typeof Notification!=="undefined"&&Notification.permission==="granted");
   const [todoFilter,setTodoFilter]=useState("all");
+  const [todoTagFilter,setTodoTagFilter]=useState(null);
+  const [tagPickerOpen,setTagPickerOpen]=useState(null);
   const saveTimer=useRef({});
   const recurringTimer=useRef(null);
   const timelineRef=useRef(null);
@@ -356,6 +360,14 @@ function Planner({user}){
   }
   function toggleTodo(dk,task,todoId){
     const upd=todos=>todos.map(td=>td.id===todoId?{...td,done:!td.done}:td);
+    if(task._recurring){
+      const dd=dayData(dk),ex=dd.tasks.find(t=>t.repeatId===task.repeatId);
+      if(ex) updateTasks(dk,dd.tasks.map(t=>t.repeatId===task.repeatId?{...t,todos:upd(t.todos||[])}:t));
+      else updateTasks(dk,[...dd.tasks,{...task,id:Date.now(),todos:upd(task.todos||[])}]);
+    } else { updateTasks(dk,dayData(dk).tasks.map(t=>t.id===task.id?{...t,todos:upd(t.todos||[])}:t)); }
+  }
+  function setTodoTag(dk,task,todoId,tag){
+    const upd=todos=>todos.map(td=>td.id===todoId?{...td,tag:td.tag===tag?null:tag}:td);
     if(task._recurring){
       const dd=dayData(dk),ex=dd.tasks.find(t=>t.repeatId===task.repeatId);
       if(ex) updateTasks(dk,dd.tasks.map(t=>t.repeatId===task.repeatId?{...t,todos:upd(t.todos||[])}:t));
@@ -676,14 +688,30 @@ function Planner({user}){
                         <textarea rows={3} placeholder="Add notes…" value={task.note||""} onChange={e=>updateNote(selected,task,e.target.value)} style={{width:"100%",fontSize:12,resize:"vertical",padding:"4px 6px"}}/>
                         {(task.todos||[]).length>0&&(
                           <div style={{marginTop:6}}>
-                            {(task.todos||[]).map(td=>(
-                              <div key={td.id} onClick={()=>toggleTodo(selected,task,td.id)} style={{display:"flex",gap:6,alignItems:"flex-start",padding:"3px 0",cursor:"pointer"}}>
-                                <div style={{width:13,height:13,borderRadius:3,border:`1.5px solid ${tc}`,background:td.done?tc:"none",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                                  {td.done&&<span style={{fontSize:9,color:"#fff",lineHeight:1}}>✓</span>}
+                            {(task.todos||[]).map(td=>{
+                              const tagColor=td.tag?TODO_TAG_COLORS[td.tag]||"#888":null;
+                              const isTagOpen=tagPickerOpen===`${task.id}-${td.id}`;
+                              return (
+                                <div key={td.id} style={{marginBottom:4}}>
+                                  <div style={{display:"flex",gap:6,alignItems:"flex-start",padding:"3px 0"}}>
+                                    <div onClick={()=>toggleTodo(selected,task,td.id)} style={{width:13,height:13,borderRadius:3,border:`1.5px solid ${tc}`,background:td.done?tc:"none",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                                      {td.done&&<span style={{fontSize:9,color:"#fff",lineHeight:1}}>✓</span>}
+                                    </div>
+                                    <span style={{fontSize:12,textDecoration:td.done?"line-through":"none",lineHeight:1.4,color:td.done?"#bbb":"#1a1a1a",flex:1}}>{td.text}</span>
+                                    {td.tag&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:tagColor+"22",color:tagColor,flexShrink:0,cursor:"pointer"}} onClick={()=>setTagPickerOpen(isTagOpen?null:`${task.id}-${td.id}`)}>{td.tag}</span>}
+                                    <button onClick={()=>setTagPickerOpen(isTagOpen?null:`${task.id}-${td.id}`)} style={{fontSize:10,color:"#ccc",background:"none",border:"1px solid #e0e0e0",borderRadius:4,padding:"0 4px",lineHeight:"16px",flexShrink:0}}>{td.tag?"…":"tag"}</button>
+                                  </div>
+                                  {isTagOpen&&(
+                                    <div style={{display:"flex",flexWrap:"wrap",gap:3,paddingLeft:19,marginBottom:2}}>
+                                      {TODO_TAGS.map(tg=>{
+                                        const tgc=TODO_TAG_COLORS[tg];
+                                        return <button key={tg} onClick={()=>{setTodoTag(selected,task,td.id,tg);setTagPickerOpen(null);}} style={{fontSize:10,padding:"2px 7px",borderRadius:99,border:td.tag===tg?`1.5px solid ${tgc}`:"1px solid #e0e0e0",background:td.tag===tg?tgc+"22":"none",color:td.tag===tg?tgc:"#999"}}>{tg}</button>;
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
-                                <span style={{fontSize:12,textDecoration:td.done?"line-through":"none",lineHeight:1.4,color:td.done?"#bbb":"#1a1a1a"}}>{td.text}</span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                         <div style={{display:"flex",gap:4,marginTop:5}}>
@@ -818,10 +846,18 @@ function Planner({user}){
             <button onClick={()=>setShowTodoPanel(false)} style={{fontSize:18,color:"#bbb",background:"none",border:"none",lineHeight:1}}>×</button>
           </div>
           {/* Filter */}
-          <div style={{padding:"8px 14px",borderBottom:B,display:"flex",gap:4,flexShrink:0}}>
-            {["all","today","pending","done"].map(f=>(
-              <button key={f} onClick={()=>setTodoFilter(f)} style={{fontSize:11,padding:"3px 9px",borderRadius:99,border:todoFilter===f?"1.5px solid #7F77DD":B,background:todoFilter===f?"#EEEDFE":"none",color:todoFilter===f?"#3C3489":"#888"}}>{f}</button>
-            ))}
+          <div style={{padding:"8px 14px",borderBottom:B,flexShrink:0}}>
+            <div style={{display:"flex",gap:4,marginBottom:6}}>
+              {["all","today","pending","done"].map(f=>(
+                <button key={f} onClick={()=>setTodoFilter(f)} style={{fontSize:11,padding:"3px 9px",borderRadius:99,border:todoFilter===f?"1.5px solid #7F77DD":B,background:todoFilter===f?"#EEEDFE":"none",color:todoFilter===f?"#3C3489":"#888"}}>{f}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+              {TODO_TAGS.map(tg=>{
+                const tgc=TODO_TAG_COLORS[tg];
+                return <button key={tg} onClick={()=>setTodoTagFilter(todoTagFilter===tg?null:tg)} style={{fontSize:10,padding:"2px 7px",borderRadius:99,border:todoTagFilter===tg?`1.5px solid ${tgc}`:"1px solid #e0e0e0",background:todoTagFilter===tg?tgc+"22":"none",color:todoTagFilter===tg?tgc:"#bbb"}}>{tg}</button>;
+              })}
+            </div>
           </div>
           {/* Grouped by day */}
           <div style={{flex:1,overflowY:"auto",padding:"8px 14px"}}>
@@ -833,8 +869,9 @@ function Planner({user}){
               return relevantDays.map(dk=>{
                 const eff=getEffectiveTasks(dk).filter(t=>!t._cancelled);
                 const allTodos=eff.flatMap(task=>(task.todos||[]).map(td=>({...td,taskName:task.name,taskType:task.type,taskId:task.id,task})));
-                const filtered=todoFilter==="done"?allTodos.filter(td=>td.done):
-                  todoFilter==="pending"?allTodos.filter(td=>!td.done):allTodos;
+                const filtered=allTodos
+                  .filter(td=>todoFilter==="done"?td.done:todoFilter==="pending"?!td.done:true)
+                  .filter(td=>todoTagFilter?td.tag===todoTagFilter:true);
                 if(filtered.length===0) return null;
                 const {short,num,month}=fmtDay(dk);
                 const isToday=dk===today;
@@ -849,6 +886,7 @@ function Planner({user}){
                     </div>
                     {filtered.map((td,i)=>{
                       const tc=TYPE_COLORS[td.taskType]||"#888";
+                      const tagColor=td.tag?TODO_TAG_COLORS[td.tag]||"#888":null;
                       return (
                         <div key={i} onClick={()=>toggleTodo(dk,td.task,td.id)} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"5px 6px",borderRadius:6,marginBottom:3,cursor:"pointer",background:td.done?"#fafafa":"#fff",border:td.done?"1px solid #f0f0f0":G}}>
                           <div style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${tc}`,background:td.done?tc:"none",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -856,7 +894,10 @@ function Planner({user}){
                           </div>
                           <div style={{flex:1,minWidth:0}}>
                             <p style={{fontSize:12,textDecoration:td.done?"line-through":"none",color:td.done?"#bbb":"#1a1a1a",lineHeight:1.3}}>{td.text}</p>
-                            <p style={{fontSize:10,color:"#bbb",marginTop:1}}>{td.taskName} · <span style={{color:tc}}>{td.taskType}</span></p>
+                            <div style={{display:"flex",gap:4,alignItems:"center",marginTop:2,flexWrap:"wrap"}}>
+                              <p style={{fontSize:10,color:"#bbb"}}>{td.taskName} · <span style={{color:tc}}>{td.taskType}</span></p>
+                              {td.tag&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:tagColor+"22",color:tagColor}}>{td.tag}</span>}
+                            </div>
                           </div>
                         </div>
                       );
