@@ -7,9 +7,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="Smart Planner"/>
 <title>Smart Planner</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,15 +24,16 @@
     input, textarea, select { background: #2a2a2a; border-color: #3a3a3a; color: #f0f0f0; }
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+<script type="text/babel" data-presets="react">
 
 // ─── CONFIG — REPLACE THESE ──────────────────────────────────────────────────
 const SUPABASE_URL      = "https://wojfppyjesmfrwfrndun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvamZwcHlqZXNtZnJ3ZnJuZHVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNjg0MjcsImV4cCI6MjA5MDk0NDQyN30._vY9WY4rNS2iMjK08B4tuNFKfIECBF0iFmvT6s-KgiY";
-const GOOGLE_CLIENT_ID  = "Y222119709391-mnvb6qffpest6sp28ddqtthqc0guoi01.apps.googleusercontent.com";   // from Google Cloud Console
+const GOOGLE_CLIENT_ID  = "222119709391-mnvb6qffpest6sp28ddqtthqc0guoi01.apps.googleusercontent.com ";   // from Google Cloud Console
 const SITE_URL          = "https://hannahjohnstone.github.io/smart-planner";
 // ─────────────────────────────────────────────────────────────────────────────
 
