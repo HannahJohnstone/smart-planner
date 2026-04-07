@@ -323,7 +323,7 @@ function Planner({user}){
     setTimetableSlots(prev=>prev.map((d,i)=>i===dayIdx?{...d,slots:d.slots.map((s,si)=>si===slotIdx?{...s,[field]:val}:s)}:d));
   }
 
-  async async function clearDay(){
+  async   async function clearDay(){
     const dd=dayData(selected);
     const cleared={...dd,tasks:[]};
     setDayData(selected,cleared);
