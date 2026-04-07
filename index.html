@@ -33,7 +33,7 @@
 // ─── CONFIG — REPLACE THESE ──────────────────────────────────────────────────
 const SUPABASE_URL      = "https://wojfppyjesmfrwfrndun.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvamZwcHlqZXNtZnJ3ZnJuZHVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNjg0MjcsImV4cCI6MjA5MDk0NDQyN30._vY9WY4rNS2iMjK08B4tuNFKfIECBF0iFmvT6s-KgiY";
-const GOOGLE_CLIENT_ID  = "222119709391-mnvb6qffpest6sp28ddqtthqc0guoi01.apps.googleusercontent.com ";   // from Google Cloud Console
+const GOOGLE_CLIENT_ID  = "222119709391-mnvb6qffpest6sp28ddqtthqc0guoi01.apps.googleusercontent.com ";
 const SITE_URL          = "https://hannahjohnstone.github.io/smart-planner";
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ function doesRecurOn(rec,dk){
   const dow=fmtDay(dk).dow;
   if(rec.repeat==="daily") return true;
   if(rec.repeat==="weekdays") return dow<5;
-  if(rec.repeat==="weekly") return fmtDay(rec.repeatStart||rec.startDate||dk).dow===dow;
+  if(rec.repeat==="weekly") return fmtDay(rec.repeatStart||rec.repeatStart||dk).dow===dow;
   if(rec.repeat==="custom") return (rec.repeatDays||[]).includes(dow);
   return false;
 }
@@ -111,8 +111,82 @@ function parseTodos(note){
   return (note||"").split("\n").map(l=>l.trim()).filter(Boolean).map((text,i)=>({id:i,text,done:false,tag:null}));
 }
 const mkTask=()=>({id:Date.now()+Math.random(),name:"",duration:60,priority:"medium",types:["task"],done:false,note:"",todos:[],startTime:"09:00",repeat:"none",repeatDays:[],repeatId:null,repeatStart:"",repeatEnd:"",reminder:"none",fixed:false});
-// helper: primary type for colour (first in array)
 function primaryType(task){ return (task.types&&task.types.length>0)?task.types[0]:(task.type||"task"); }
+
+// ─── MEAL PLANNER EXPORT ──────────────────────────────────────────────────────
+// Writes a weekly summary to localStorage so the Meal Planner can read it.
+// The meal planner reads the key 'smartplanner_week' automatically.
+function exportWeekSummaryToMealPlanner(allDataSnapshot, recurringSnapshot, weekDaysSnapshot) {
+  try {
+    const today = todayKey();
+    const days = {};
+
+    weekDaysSnapshot.forEach(dk => {
+      const stored = (allDataSnapshot[dk]?.tasks || []).map(t => ({
+        ...t, types: t.types || (t.type ? [t.type] : ['task'])
+      }));
+      const cancelledIds = new Set(stored.filter(t => t._cancelled).map(t => String(t.repeatId)));
+      const storedRecurIds = new Set(stored.filter(t => !t._cancelled && t.repeatId).map(t => String(t.repeatId)));
+      const recTasks = (recurringSnapshot || [])
+        .filter(r => doesRecurOn(r, dk) && !cancelledIds.has(String(r.id)) && !storedRecurIds.has(String(r.id)))
+        .map(r => ({ ...r, types: r.types || (r.type ? [r.type] : ['task']) }));
+      const allTasks = [...recTasks, ...stored.filter(t => !t._cancelled)];
+
+      const workTasks = allTasks.filter(t => !['break','meal'].some(x => (t.types||[]).includes(x)));
+      const totalWorkMins = workTasks.reduce((s, t) => s + (t.duration || 0), 0);
+      const hasMeetings = allTasks.some(t => (t.types||[]).includes('meeting'));
+      const hasClass = allTasks.some(t => (t.types||[]).includes('class') || (t.types||[]).includes('tutoring'));
+      const hasPhD = allTasks.some(t => (t.types||[]).includes('PhD'));
+      const energy = allDataSnapshot[dk]?.energy || 3;
+      const taskCount = workTasks.length;
+
+      // Busy score: high task load + meetings/classes + low energy
+      let busyScore = 0;
+      if (totalWorkMins > 360) busyScore += 2;
+      else if (totalWorkMins > 240) busyScore += 1;
+      if (hasMeetings) busyScore += 1;
+      if (hasClass) busyScore += 1;
+      if (energy <= 2) busyScore += 1;
+
+      days[dk] = {
+        totalWorkMins,
+        taskCount,
+        isBusy: busyScore >= 3,
+        isFree: taskCount <= 1 && totalWorkMins < 120,
+        hasMeetings,
+        hasClass,
+        hasPhD,
+        energy,
+        types: [...new Set(allTasks.flatMap(t => t.types || []))].filter(x => x !== 'break' && x !== 'meal'),
+        isToday: dk === today,
+      };
+    });
+
+    const label = dk => fmtDay(dk).short + ' ' + new Date(dk + 'T12:00:00').getDate();
+    const busyDays   = Object.entries(days).filter(([,v]) => v.isBusy).map(([dk]) => label(dk));
+    const freeDays   = Object.entries(days).filter(([,v]) => v.isFree).map(([dk]) => label(dk));
+    const lowEnergyDays = Object.entries(days).filter(([,v]) => v.energy <= 2).map(([dk]) => label(dk));
+
+    const summary = {
+      exportedAt: new Date().toISOString(),
+      weekStart: weekDaysSnapshot[0],
+      busyDays,
+      freeDays,
+      lowEnergyDays,
+      days,
+      notes: [
+        busyDays.length    ? `Busy days this week: ${busyDays.join(', ')}` : '',
+        freeDays.length    ? `More free time on: ${freeDays.join(', ')}` : '',
+        lowEnergyDays.length ? `Low energy on: ${lowEnergyDays.join(', ')}` : '',
+      ].filter(Boolean).join('. '),
+    };
+
+    localStorage.setItem('smartplanner_week', JSON.stringify(summary));
+  } catch(e) {
+    // Silent fail — never break the planner
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─── SUPABASE DB ──────────────────────────────────────────────────────────────
 async function dbLoad(userId){
@@ -281,14 +355,12 @@ function Planner({user}){
     if(!targetDk||targetDk===sourceDk) return;
     const sourceTasks=dayData(sourceDk).tasks||[];
     const targetDd=dayData(targetDk);
-    // Give copied tasks new IDs to avoid conflicts
     const copied=sourceTasks.map(t=>({...t,id:Date.now()+Math.random(),repeatId:null,_recurring:false}));
     setDayData(targetDk,{...targetDd,tasks:[...(targetDd.tasks||[]),...copied]});
     setShowCopyDay(false); setCopyTarget("");
   }
 
   function applyTimetable(startDk){
-    // Apply timetable slots as recurring tasks for current week onwards
     const newRec=[...recurring];
     timetableSlots.forEach(({day,slots})=>{
       const dowIdx=DOW.indexOf(day);
@@ -325,7 +397,7 @@ function Planner({user}){
     setTimetableSlots(prev=>prev.map((d,i)=>i===dayIdx?{...d,slots:d.slots.map((s,si)=>si===slotIdx?{...s,[field]:val}:s)}:d));
   }
 
-async function clearDay(){
+  async function clearDay(){
     const dd=dayData(selected);
     const cleared={...dd,tasks:[]};
     setDayData(selected,cleared);
@@ -336,6 +408,7 @@ async function clearDay(){
   async function clearAll(){
     localStorage.removeItem("smart-planner-v4");
     localStorage.removeItem("smart-planner-v4-recurring");
+    localStorage.removeItem("smartplanner_week");
     try{
       await sb.from("planner_days").delete().eq("user_id",user.id);
       await sb.from("planner_recurring").delete().eq("user_id",user.id);
@@ -350,14 +423,12 @@ async function clearDay(){
   const timelineRef=useRef(null);
   const today=todayKey();
 
-  // Handle Google OAuth callback in URL hash
   useEffect(()=>{
     if(parseGcalCallback()){
       const t=getGcalToken(); setGcalTokenState(t);
     }
   },[]);
 
-  // Load data
   useEffect(()=>{
     async function load(){
       let loadedDays={}, loadedRec=[];
@@ -373,11 +444,12 @@ async function clearDay(){
       setAllData(loadedDays); setRecurring(loadedRec);
       setLoaded(true);
       scheduleAllReminders(loadedDays,loadedRec,getWeekDays(todayKey()));
+      // Export to meal planner on initial load
+      exportWeekSummaryToMealPlanner(loadedDays, loadedRec, getWeekDays(todayKey()));
     }
     load();
   },[user.id]);
 
-  // Fetch Google Calendar events when week or token changes
   useEffect(()=>{
     if(!gcalToken||!isTokenValid(gcalToken)) return;
     setGcalLoading(true);
@@ -386,15 +458,22 @@ async function clearDay(){
       .catch(()=>setGcalLoading(false));
   },[gcalToken,weekDays]);
 
-  function persistDay(dk,data){
-    localStorage.setItem("smart-planner-v4",JSON.stringify({...allData,[dk]:data}));
+  // ── persistDay: saves to localStorage + Supabase, and exports to meal planner ──
+  function persistDay(dk, data){
+    const newAllData = {...allData, [dk]: data};
+    localStorage.setItem("smart-planner-v4", JSON.stringify(newAllData));
+    // Export week summary for the meal planner whenever anything changes
+    exportWeekSummaryToMealPlanner(newAllData, recurring, weekDays);
     clearTimeout(saveTimer.current[dk]);
     saveTimer.current[dk]=setTimeout(async()=>{
       setSyncing(true); await dbSaveDay(user.id,dk,data).catch(()=>{}); setSyncing(false);
     },1200);
   }
+
   function persistRecurring(rec){
     localStorage.setItem("smart-planner-v4-recurring",JSON.stringify(rec));
+    // Also re-export so recurring task changes are reflected
+    exportWeekSummaryToMealPlanner(allData, rec, weekDays);
     clearTimeout(recurringTimer.current);
     recurringTimer.current=setTimeout(async()=>{
       setSyncing(true); await dbSaveRecurring(user.id,rec).catch(()=>{}); setSyncing(false);
@@ -410,6 +489,11 @@ async function clearDay(){
     const d=new Date(weekOf+"T12:00:00"); d.setDate(d.getDate()+dir*7);
     const nk=d.toISOString().slice(0,10); setWeekOf(nk); setWeekDays(getWeekDays(nk));
   }
+
+  // Re-export when week changes so meal planner sees the right week
+  useEffect(()=>{
+    if(loaded) exportWeekSummaryToMealPlanner(allData, recurring, weekDays);
+  },[weekDays, loaded]);
 
   function getEffectiveTasks(dk){
     const stored=(dayData(dk).tasks||[]).map(t=>({...t,types:t.types||(t.type?[t.type]:["task"])}));
@@ -557,7 +641,6 @@ async function clearDay(){
         </div>
         <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
           {syncing&&<span style={{fontSize:11,color:"#7F77DD"}}>Syncing…</span>}
-          {/* Google Calendar button */}
           {gcalConnected ? (
             <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:6,border:"1px solid #1D9E7555",background:"#E1F5EE",fontSize:11,color:"#0F6E56"}}>
               <span style={{width:6,height:6,borderRadius:"50%",background:"#1D9E75",display:"inline-block"}}/>
@@ -587,7 +670,7 @@ async function clearDay(){
       {showRecurring&&(
         <div style={{padding:"10px 14px",borderBottom:B,background:"#fafafa"}}>
           <p style={{fontSize:12,fontWeight:500,marginBottom:8}}>Recurring tasks</p>
-          {recurring.length===0&&<p style={{fontSize:12,color:"#bbb"}}>No recurring tasks yet. Set a repeat option when adding a task.</p>}
+          {recurring.length===0&&<p style={{fontSize:12,color:"#bbb"}}>No recurring tasks yet.</p>}
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {recurring.map(r=>{
               const tc=TYPE_COLORS[r.type]||"#888";
@@ -608,7 +691,6 @@ async function clearDay(){
 
       {view==="week" ? (
         <div style={{overflowX:"auto"}}>
-          {/* Day headers */}
           <div style={{display:"grid",gridTemplateColumns:"40px repeat(7,1fr)",borderBottom:B,minWidth:520}}>
             <div/>
             {weekDays.map(dk=>{
@@ -620,7 +702,6 @@ async function clearDay(){
                   <div style={{width:26,height:26,borderRadius:"50%",background:isToday?"#7F77DD":"none",display:"flex",alignItems:"center",justifyContent:"center",margin:"2px auto 1px"}}>
                     <p style={{fontSize:14,fontWeight:500,color:isToday?"#fff":"#1a1a1a"}}>{num}</p>
                   </div>
-                  {/* Google event dot indicators */}
                   {dayGcal.length>0&&<div style={{display:"flex",justifyContent:"center",gap:2,marginTop:2}}>
                     {dayGcal.slice(0,3).map((_,i)=><div key={i} style={{width:4,height:4,borderRadius:"50%",background:GCAL_COLOR}}/>)}
                   </div>}
@@ -629,7 +710,6 @@ async function clearDay(){
             })}
           </div>
 
-          {/* Grid */}
           <div style={{position:"relative",minWidth:520,maxHeight:500,overflowY:"auto"}}>
             {HOURS.map(h=>(
               <div key={h} style={{display:"grid",gridTemplateColumns:"40px repeat(7,1fr)",height:HOUR_H}}>
@@ -642,7 +722,6 @@ async function clearDay(){
               </div>
             ))}
 
-            {/* Planner blocks */}
             {weekDays.map((dk,di)=>{
               const eff=getEffectiveTasks(dk).filter(t=>!t._cancelled);
               const sched=schedule(eff,dayData(dk).dayStart||"08:00");
@@ -659,7 +738,6 @@ async function clearDay(){
               });
             })}
 
-            {/* Google Calendar blocks in week view */}
             {weekDays.map((dk,di)=>{
               const dayEvs=gcalEvents.filter(e=>e.dk===dk);
               const colW=`calc((100% - 40px)/7)`;
@@ -675,7 +753,6 @@ async function clearDay(){
             })}
           </div>
 
-          {/* Legend */}
           <div style={{padding:"8px 14px",borderTop:B,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
             {TYPES.map(ty=>(
               <span key={ty} style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:"#666"}}>
@@ -691,12 +768,9 @@ async function clearDay(){
           </div>
         </div>
       ) : (
-        /* DAY VIEW */
         <div style={{display:"grid",gridTemplateColumns:"220px 1fr",minHeight:"calc(100vh - 56px)"}}>
 
-          {/* LEFT PANEL */}
           <div style={{borderRight:B,display:"flex",flexDirection:"column",maxHeight:"calc(100vh - 56px)"}}>
-            {/* Mini day picker */}
             <div style={{display:"flex",padding:"8px 8px 6px",borderBottom:B,gap:2,flexShrink:0}}>
               {weekDays.map(dk=>{
                 const {short,num}=fmtDay(dk),isToday=dk===today,isSel=dk===selected;
@@ -711,7 +785,6 @@ async function clearDay(){
               })}
             </div>
 
-            {/* Energy + start */}
             <div style={{padding:"8px 10px",borderBottom:B,display:"flex",gap:10,alignItems:"center",flexShrink:0}}>
               <div>
                 <p style={{fontSize:10,color:"#bbb",marginBottom:3}}>Start</p>
@@ -727,7 +800,6 @@ async function clearDay(){
               </div>
             </div>
 
-            {/* Warnings */}
             {selWarnings.length>0&&(
               <div style={{padding:"6px 10px",borderBottom:B,flexShrink:0}}>
                 {selWarnings.map((w,i)=>(
@@ -736,7 +808,6 @@ async function clearDay(){
               </div>
             )}
 
-            {/* Google events for day */}
             {gcalConnected&&selGcal.length>0&&(
               <div style={{padding:"6px 10px",borderBottom:B,flexShrink:0}}>
                 <p style={{fontSize:10,color:"#bbb",marginBottom:4}}>Google Calendar</p>
@@ -750,7 +821,6 @@ async function clearDay(){
               </div>
             )}
 
-            {/* Task list */}
             <div style={{flex:1,overflowY:"auto",padding:"6px 8px"}}>
               {selSched.length===0&&<p style={{fontSize:12,color:"#bbb",textAlign:"center",marginTop:20}}>No tasks — add one below</p>}
               {selSched.map(task=>{
@@ -787,13 +857,12 @@ async function clearDay(){
                         <p style={{fontSize:10,color:"#bbb",marginTop:1}}>{minsToTime(task._s)}–{minsToTime(task._e)} · {fmtDur(task.duration)}</p>
                         {totalTodos>0&&<p style={{fontSize:10,color:"#bbb",marginTop:1}}>{doneTodos}/{totalTodos} todos</p>}
                       </div>
-                      <button title={task._recurring?"Remove from today":"Delete task"} onClick={()=>removeTask(selected,task.id,task._recurring,task.repeatId)} style={{fontSize:13,color:"#ccc",background:"none",border:"none",padding:"0 2px",flexShrink:0}}>×</button>                    </div>
+                      <button title={task._recurring?"Remove from today":"Delete task"} onClick={()=>removeTask(selected,task.id,task._recurring,task.repeatId)} style={{fontSize:13,color:"#ccc",background:"none",border:"none",padding:"0 2px",flexShrink:0}}>×</button>
+                    </div>
                     {isExp&&(
                       <div style={{padding:"0 8px 8px",borderTop:"1px solid #f5f5f5"}}>
-                        {/* Editable name */}
                         <p style={{fontSize:10,color:"#bbb",margin:"6px 0 3px"}}>Name</p>
                         <input value={task.name} onChange={e=>updateTaskField("name",e.target.value)} style={{width:"100%",fontSize:12,marginBottom:6}}/>
-                        {/* Types */}
                         <p style={{fontSize:10,color:"#bbb",margin:"6px 0 3px"}}>Types (select multiple)</p>
                         <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:6}}>
                           {TYPES.map(ty=>{
@@ -802,14 +871,12 @@ async function clearDay(){
                             return <button key={ty} onClick={()=>toggleType(ty)} style={{fontSize:10,padding:"2px 7px",borderRadius:99,border:sel?`1.5px solid ${ttyc}`:"1px solid #e0e0e0",background:sel?ttyc+"22":"none",color:sel?ttyc:"#999"}}>{ty}</button>;
                           })}
                         </div>
-                        {/* Fixed time toggle */}
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                          <label style={{fontSize:10,color:"#bbb"}}>Fixed start time (won't be moved by scheduler)</label>
+                          <label style={{fontSize:10,color:"#bbb"}}>Fixed start time</label>
                           <div onClick={()=>updateTaskField("fixed",!task.fixed)} style={{width:32,height:18,borderRadius:99,background:task.fixed?"#1D9E75":"#e0e0e0",cursor:"pointer",position:"relative",flexShrink:0}}>
                             <div style={{position:"absolute",top:2,left:task.fixed?14:2,width:14,height:14,borderRadius:"50%",background:"#fff"}}/>
                           </div>
                         </div>
-                        {/* Time + duration */}
                         <div style={{display:"flex",gap:8,marginBottom:6}}>
                           <div style={{flex:1}}>
                             <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start</label>
@@ -820,7 +887,6 @@ async function clearDay(){
                             <input type="number" min={15} step={15} value={task.duration} onChange={e=>updateTaskField("duration",Number(e.target.value))} style={{fontSize:12,width:"100%"}}/>
                           </div>
                         </div>
-                        {/* Notes + todos (only for non-break/meal or if they want them) */}
                         <p style={{fontSize:10,color:"#bbb",margin:"4px 0 3px"}}>Notes (each line → todo)</p>
                         <textarea rows={3} placeholder="Add notes…" value={task.note||""} onChange={e=>updateNote(selected,task,e.target.value)} style={{width:"100%",fontSize:12,resize:"vertical",padding:"4px 6px"}}/>
                         {(task.todos||[]).length>0&&(
@@ -857,7 +923,6 @@ async function clearDay(){
                             style={{flex:1,fontSize:12,padding:"3px 6px"}}/>
                           <button onClick={()=>{addTodoItem(selected,task,todoInput[task.id]||"");setTodoInput(p=>({...p,[task.id]:""}));}} style={{fontSize:12,padding:"3px 8px",background:"#EEEDFE",color:"#3C3489",border:"none",borderRadius:6}}>+</button>
                         </div>
-                        {/* Delete options */}
                         <div style={{display:"flex",gap:6,marginTop:10,paddingTop:8,borderTop:"1px solid #f5f5f5"}}>
                           {task._recurring?(
                             <>
@@ -875,7 +940,6 @@ async function clearDay(){
               })}
             </div>
 
-            {/* Add area */}
             <div style={{padding:"8px",borderTop:B,flexShrink:0}}>
               {showAdd?(
                 <div style={{background:"#fafafa",borderRadius:8,padding:"10px",border:B}}>
@@ -884,7 +948,7 @@ async function clearDay(){
                     <div style={{flex:1}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start</label><input type="time" value={draft.startTime||""} onChange={e=>setDraft(d=>({...d,startTime:e.target.value}))} style={{fontSize:12,width:"100%"}}/></div>
                     <div style={{flex:1}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Mins</label><input type="number" min={15} step={15} value={draft.duration} onChange={e=>setDraft(d=>({...d,duration:Number(e.target.value)}))} style={{fontSize:12,width:"100%"}}/></div>
                   </div>
-                  <div style={{marginBottom:6}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:3}}>Types (select multiple)</label>
+                  <div style={{marginBottom:6}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:3}}>Types</label>
                     <div style={{display:"flex",flexWrap:"wrap",gap:3}}>{TYPES.map(ty=>(<button key={ty} onClick={()=>setDraft(d=>({...d,types:d.types.includes(ty)?d.types.filter(x=>x!==ty).length>0?d.types.filter(x=>x!==ty):d.types:[...d.types,ty]}))} style={{fontSize:10,padding:"2px 7px",borderRadius:99,border:(draft.types||[]).includes(ty)?`1.5px solid ${TYPE_COLORS[ty]}`:"1px solid #e0e0e0",background:(draft.types||[]).includes(ty)?TYPE_COLORS[ty]+"22":"none",color:(draft.types||[]).includes(ty)?TYPE_COLORS[ty]:"#999"}}>{ty}</button>))}</div>
                   </div>
                   <div style={{marginBottom:6}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:3}}>Repeat</label>
@@ -892,14 +956,8 @@ async function clearDay(){
                     {draft.repeat==="custom"&&<div style={{display:"flex",gap:3,marginTop:5,flexWrap:"wrap"}}>{DOW.map((day,i)=>(<button key={i} onClick={()=>setDraft(d=>({...d,repeatDays:d.repeatDays.includes(i)?d.repeatDays.filter(x=>x!==i):[...d.repeatDays,i]}))} style={{fontSize:10,padding:"2px 6px",borderRadius:99,border:(draft.repeatDays||[]).includes(i)?"1.5px solid #D85A30":"1px solid #e0e0e0",background:(draft.repeatDays||[]).includes(i)?"#FAECE7":"none",color:(draft.repeatDays||[]).includes(i)?"#D85A30":"#999"}}>{day}</button>))}</div>}
                     {draft.repeat!=="none"&&(
                       <div style={{display:"flex",gap:6,marginTop:6}}>
-                        <div style={{flex:1}}>
-                          <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start date</label>
-                          <input type="date" value={draft.repeatStart||""} onChange={e=>setDraft(d=>({...d,repeatStart:e.target.value}))} style={{fontSize:11,width:"100%"}}/>
-                        </div>
-                        <div style={{flex:1}}>
-                          <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>End date (optional)</label>
-                          <input type="date" value={draft.repeatEnd||""} onChange={e=>setDraft(d=>({...d,repeatEnd:e.target.value}))} style={{fontSize:11,width:"100%"}}/>
-                        </div>
+                        <div style={{flex:1}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start date</label><input type="date" value={draft.repeatStart||""} onChange={e=>setDraft(d=>({...d,repeatStart:e.target.value}))} style={{fontSize:11,width:"100%"}}/></div>
+                        <div style={{flex:1}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>End date</label><input type="date" value={draft.repeatEnd||""} onChange={e=>setDraft(d=>({...d,repeatEnd:e.target.value}))} style={{fontSize:11,width:"100%"}}/></div>
                       </div>
                     )}
                   </div>
@@ -908,7 +966,6 @@ async function clearDay(){
                   </div>
                   <div style={{marginBottom:7}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:3}}>Reminder</label>
                     <div style={{display:"flex",flexWrap:"wrap",gap:3}}>{REMINDER_OPTIONS.map(r=>(<button key={r} onClick={()=>setDraft(d=>({...d,reminder:r}))} style={{fontSize:10,padding:"2px 7px",borderRadius:99,border:draft.reminder===r?"1.5px solid #7F77DD":"1px solid #e0e0e0",background:draft.reminder===r?"#EEEDFE":"none",color:draft.reminder===r?"#3C3489":"#999"}}>{r}</button>))}</div>
-                    {!notifGranted&&draft.reminder!=="none"&&<p style={{fontSize:10,color:"#BA7517",marginTop:4}}>Enable reminders in the header to receive notifications.</p>}
                   </div>
                   <textarea placeholder="Notes (each line → todo)" value={draft.note} onChange={e=>setDraft(d=>({...d,note:e.target.value}))} rows={2} style={{width:"100%",fontSize:12,resize:"none",padding:"4px 6px",marginBottom:7}}/>
                   <div style={{display:"flex",gap:5}}>
@@ -919,31 +976,21 @@ async function clearDay(){
               ):(
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>setShowAdd(true)} style={{flex:1,padding:"6px",fontSize:12,fontWeight:500,background:"#EEEDFE",color:"#3C3489",border:"none",borderRadius:6}}>+ Task</button>
-                  <button onClick={()=>{
-                    const now=new Date(); const st=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-                    updateTasks(selected,[...dayData(selected).tasks,{id:Date.now(),name:"Break",duration:15,priority:"low",types:["break"],done:false,note:"",todos:[],startTime:st,repeat:"none",repeatId:null}]);
-                  }} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Break</button>
-                  <button onClick={()=>{
-                    const now=new Date(); const st=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-                    updateTasks(selected,[...dayData(selected).tasks,{id:Date.now(),name:"Meal",duration:30,priority:"low",types:["meal"],done:false,note:"",todos:[],startTime:st,repeat:"none",repeatId:null}]);
-                  }} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Meal</button>
+                  <button onClick={()=>{const now=new Date();const st=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;updateTasks(selected,[...dayData(selected).tasks,{id:Date.now(),name:"Break",duration:15,priority:"low",types:["break"],done:false,note:"",todos:[],startTime:st,repeat:"none",repeatId:null}]);}} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Break</button>
+                  <button onClick={()=>{const now=new Date();const st=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;updateTasks(selected,[...dayData(selected).tasks,{id:Date.now(),name:"Meal",duration:30,priority:"low",types:["meal"],done:false,note:"",todos:[],startTime:st,repeat:"none",repeatId:null}]);}} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Meal</button>
                 </div>
               )}
             </div>
           </div>
 
-          {/* RIGHT: TIMELINE */}
           <div style={{position:"relative",overflowY:"auto",maxHeight:"calc(100vh - 56px)"}} ref={timelineRef}>
             {HOURS.map(h=>(
               <div key={h} style={{display:"flex",height:HOUR_H,borderTop:G,boxSizing:"border-box",position:"relative"}}>
                 <div style={{width:44,flexShrink:0,fontSize:10,color:"#ccc",padding:"3px 6px 0",textAlign:"right"}}>{String(h).padStart(2,"0")}:00</div>
-                <div style={{flex:1,borderLeft:G,position:"relative"}}>
-                  <div style={{position:"absolute",top:"50%",left:0,right:0,borderTop:GD}}/>
-                </div>
+                <div style={{flex:1,borderLeft:G,position:"relative"}}><div style={{position:"absolute",top:"50%",left:0,right:0,borderTop:GD}}/></div>
               </div>
             ))}
 
-            {/* Google Calendar blocks */}
             {selGcal.map(ev=>{
               const top=minsToY(ev.startMins),height=Math.max((ev.duration/60)*HOUR_H,20);
               if(top<0) return null;
@@ -955,7 +1002,6 @@ async function clearDay(){
               );
             })}
 
-            {/* Planner task blocks */}
             {selSched.map(task=>{
               const top=minsToY(task._s),height=Math.max((task.duration/60)*HOUR_H,20);
               const pt=primaryType(task);
@@ -993,7 +1039,6 @@ async function clearDay(){
             <p style={{fontSize:12,color:"#888",marginBottom:16}}>Copy all tasks from <strong>{fmtDay(selected).short} {fmtDay(selected).num} {fmtDay(selected).month}</strong> to another day.</p>
             <label style={{fontSize:11,color:"#bbb",display:"block",marginBottom:4}}>Copy to date</label>
             <input type="date" value={copyTarget} onChange={e=>setCopyTarget(e.target.value)} style={{width:"100%",fontSize:13,marginBottom:16}}/>
-            <p style={{fontSize:11,color:"#bbb",marginBottom:16}}>Existing tasks on the target day will be kept — copied tasks are added on top.</p>
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>{setShowCopyDay(false);setCopyTarget("");}} style={{flex:1,padding:"8px",fontSize:13,background:"none",border:B,borderRadius:6,color:"#666"}}>Cancel</button>
               <button onClick={()=>copyDayTo(selected,copyTarget)} disabled={!copyTarget} style={{flex:1,padding:"8px",fontSize:13,fontWeight:500,background:"#E6F1FB",color:"#185FA5",border:"none",borderRadius:6,opacity:copyTarget?1:0.4}}>Copy tasks</button>
@@ -1010,42 +1055,25 @@ async function clearDay(){
               <p style={{fontSize:15,fontWeight:500}}>Teaching timetable</p>
               <button onClick={()=>setShowTimetable(false)} style={{fontSize:18,color:"#bbb",background:"none",border:"none"}}>×</button>
             </div>
-            <p style={{fontSize:12,color:"#888",marginBottom:16}}>Add your recurring weekly slots. Each will be saved as a recurring event.</p>
+            <p style={{fontSize:12,color:"#888",marginBottom:16}}>Add your recurring weekly slots.</p>
             {timetableSlots.map(({day,slots},dayIdx)=>(
               <div key={day} style={{marginBottom:16}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                  <p style={{fontSize:12,fontWeight:500,color:"#1a1a1a"}}>{day}</p>
+                  <p style={{fontSize:12,fontWeight:500}}>{day}</p>
                   <button onClick={()=>addTimetableSlot(dayIdx)} style={{fontSize:11,padding:"2px 8px",borderRadius:6,border:"1px solid #1D9E75",background:"#E1F5EE",color:"#0F6E56"}}>+ Add slot</button>
                 </div>
-                {slots.length===0&&<p style={{fontSize:11,color:"#ccc",marginBottom:4}}>No slots — click Add slot</p>}
+                {slots.length===0&&<p style={{fontSize:11,color:"#ccc",marginBottom:4}}>No slots</p>}
                 {slots.map((slot,slotIdx)=>(
                   <div key={slotIdx} style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:8,padding:"8px",background:"#fafafa",borderRadius:6,border:G,flexWrap:"wrap"}}>
-                    <div style={{flex:"2 1 120px"}}>
-                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Name</label>
-                      <input value={slot.name} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"name",e.target.value)} placeholder="e.g. Lecture" style={{width:"100%",fontSize:12}}/>
-                    </div>
-                    <div style={{flex:"1 1 80px"}}>
-                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start</label>
-                      <input type="time" value={slot.startTime} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"startTime",e.target.value)} style={{width:"100%",fontSize:12}}/>
-                    </div>
-                    <div style={{flex:"1 1 60px"}}>
-                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Mins</label>
-                      <input type="number" min={15} step={15} value={slot.duration} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"duration",e.target.value)} style={{width:"100%",fontSize:12}}/>
-                    </div>
-                    <div style={{flex:"1 1 80px"}}>
-                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Type</label>
-                      <select value={slot.type} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"type",e.target.value)} style={{width:"100%",fontSize:12,padding:"3px 4px"}}>
-                        {TYPES.map(ty=><option key={ty} value={ty}>{ty}</option>)}
-                      </select>
-                    </div>
-                    <div style={{flex:"1 1 100px"}}>
-                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>End date</label>
-                      <input type="date" value={slot.endDate} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"endDate",e.target.value)} style={{width:"100%",fontSize:11}}/>
-                    </div>
+                    <div style={{flex:"2 1 120px"}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Name</label><input value={slot.name} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"name",e.target.value)} placeholder="e.g. Lecture" style={{width:"100%",fontSize:12}}/></div>
+                    <div style={{flex:"1 1 80px"}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start</label><input type="time" value={slot.startTime} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"startTime",e.target.value)} style={{width:"100%",fontSize:12}}/></div>
+                    <div style={{flex:"1 1 60px"}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Mins</label><input type="number" min={15} step={15} value={slot.duration} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"duration",e.target.value)} style={{width:"100%",fontSize:12}}/></div>
+                    <div style={{flex:"1 1 80px"}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Type</label><select value={slot.type} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"type",e.target.value)} style={{width:"100%",fontSize:12,padding:"3px 4px"}}>{TYPES.map(ty=><option key={ty} value={ty}>{ty}</option>)}</select></div>
+                    <div style={{flex:"1 1 100px"}}><label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>End date</label><input type="date" value={slot.endDate} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"endDate",e.target.value)} style={{width:"100%",fontSize:11}}/></div>
                     <div style={{display:"flex",flexDirection:"column",justifyContent:"flex-end",gap:2}}>
-                      <label style={{fontSize:10,color:"#bbb"}}>Fixed time</label>
-                      <div onClick={()=>updateTimetableSlot(dayIdx,slotIdx,"fixed",!slot.fixed)} style={{width:32,height:18,borderRadius:99,background:slot.fixed!==false?"#1D9E75":"#e0e0e0",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
-                        <div style={{position:"absolute",top:2,left:slot.fixed!==false?14:2,width:14,height:14,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
+                      <label style={{fontSize:10,color:"#bbb"}}>Fixed</label>
+                      <div onClick={()=>updateTimetableSlot(dayIdx,slotIdx,"fixed",!slot.fixed)} style={{width:32,height:18,borderRadius:99,background:slot.fixed!==false?"#1D9E75":"#e0e0e0",cursor:"pointer",position:"relative"}}>
+                        <div style={{position:"absolute",top:2,left:slot.fixed!==false?14:2,width:14,height:14,borderRadius:"50%",background:"#fff"}}/>
                       </div>
                     </div>
                     <button onClick={()=>removeTimetableSlot(dayIdx,slotIdx)} style={{fontSize:14,color:"#ccc",background:"none",border:"none",alignSelf:"flex-end",padding:"4px"}}>×</button>
@@ -1065,12 +1093,12 @@ async function clearDay(){
         </div>
       )}
 
-      {/* CLEAR DAY CONFIRMATION */}
+      {/* CLEAR DAY */}
       {showClearDay&&(
         <div style={{position:"fixed",inset:0,background:"#00000033",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-          <div style={{background:"#fff",borderRadius:12,padding:"24px",maxWidth:320,width:"100%",border:B,boxShadow:"0 4px 24px #00000018"}}>
-            <p style={{fontSize:15,fontWeight:500,marginBottom:8,color:"#1a1a1a"}}>Clear {fmtDay(selected).short} {fmtDay(selected).num} {fmtDay(selected).month}?</p>
-            <p style={{fontSize:13,color:"#888",marginBottom:20,lineHeight:1.5}}>This will remove all tasks from this day. Recurring tasks will still appear unless individually removed. This cannot be undone.</p>
+          <div style={{background:"#fff",borderRadius:12,padding:"24px",maxWidth:320,width:"100%",border:B}}>
+            <p style={{fontSize:15,fontWeight:500,marginBottom:8}}>Clear {fmtDay(selected).short} {fmtDay(selected).num}?</p>
+            <p style={{fontSize:13,color:"#888",marginBottom:20,lineHeight:1.5}}>This will remove all tasks from this day. Cannot be undone.</p>
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setShowClearDay(false)} style={{flex:1,padding:"8px",fontSize:13,background:"none",border:B,borderRadius:6,color:"#666"}}>Cancel</button>
               <button onClick={clearDay} style={{flex:1,padding:"8px",fontSize:13,fontWeight:500,background:"#A32D2D",color:"#fff",border:"none",borderRadius:6}}>Clear this day</button>
@@ -1079,12 +1107,12 @@ async function clearDay(){
         </div>
       )}
 
-      {/* CLEAR DIARY CONFIRMATION */}
+      {/* CLEAR DIARY */}
       {showClearConfirm&&(
         <div style={{position:"fixed",inset:0,background:"#00000033",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-          <div style={{background:"#fff",borderRadius:12,padding:"24px",maxWidth:320,width:"100%",border:B,boxShadow:"0 4px 24px #00000018"}}>
-            <p style={{fontSize:15,fontWeight:500,marginBottom:8,color:"#1a1a1a"}}>Clear entire diary?</p>
-            <p style={{fontSize:13,color:"#888",marginBottom:20,lineHeight:1.5}}>This will permanently delete all tasks, recurring events, and notes across all days. This cannot be undone.</p>
+          <div style={{background:"#fff",borderRadius:12,padding:"24px",maxWidth:320,width:"100%",border:B}}>
+            <p style={{fontSize:15,fontWeight:500,marginBottom:8}}>Clear entire diary?</p>
+            <p style={{fontSize:13,color:"#888",marginBottom:20,lineHeight:1.5}}>Permanently deletes all tasks and recurring events. Cannot be undone.</p>
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setShowClearConfirm(false)} style={{flex:1,padding:"8px",fontSize:13,background:"none",border:B,borderRadius:6,color:"#666"}}>Cancel</button>
               <button onClick={clearAll} style={{flex:1,padding:"8px",fontSize:13,fontWeight:500,background:"#A32D2D",color:"#fff",border:"none",borderRadius:6}}>Yes, clear everything</button>
@@ -1093,14 +1121,13 @@ async function clearDay(){
         </div>
       )}
 
-      {/* SLIDE-OUT TO-DO PANEL */}
+      {/* TO-DO PANEL */}
       {showTodoPanel&&(
         <div style={{position:"fixed",top:0,right:0,bottom:0,width:320,background:"#fff",borderLeft:B,boxShadow:"-4px 0 20px #0000001a",zIndex:100,display:"flex",flexDirection:"column",overflowY:"auto"}}>
           <div style={{padding:"12px 14px",borderBottom:B,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
             <p style={{fontSize:14,fontWeight:500}}>To-do list</p>
             <button onClick={()=>setShowTodoPanel(false)} style={{fontSize:18,color:"#bbb",background:"none",border:"none",lineHeight:1}}>×</button>
           </div>
-          {/* Filter */}
           <div style={{padding:"8px 14px",borderBottom:B,flexShrink:0}}>
             <div style={{display:"flex",gap:4,marginBottom:6}}>
               {["all","today","pending","done"].map(f=>(
@@ -1114,13 +1141,10 @@ async function clearDay(){
               })}
             </div>
           </div>
-          {/* Grouped by day */}
           <div style={{flex:1,overflowY:"auto",padding:"8px 14px"}}>
             {(()=>{
               const today=todayKey();
-              const relevantDays=todoFilter==="today"?[today]:
-                todoFilter==="all"?[...new Set([...Object.keys(allData),today])].sort():
-                [...new Set([...Object.keys(allData),today])].sort();
+              const relevantDays=todoFilter==="today"?[today]:[...new Set([...Object.keys(allData),today])].sort();
               return relevantDays.map(dk=>{
                 const eff=getEffectiveTasks(dk).filter(t=>!t._cancelled);
                 const allTodos=eff.flatMap(task=>(task.todos||[]).map(td=>({...td,taskName:task.name,taskType:task.type,taskId:task.id,task})));
@@ -1137,7 +1161,7 @@ async function clearDay(){
                         <span style={{fontSize:11,fontWeight:500,color:isToday?"#fff":"#888"}}>{num}</span>
                       </div>
                       <span style={{fontSize:12,fontWeight:500,color:isToday?"#7F77DD":"#1a1a1a"}}>{isToday?"Today":`${short} ${num} ${month}`}</span>
-                      <span style={{fontSize:11,color:"#bbb",marginLeft:"auto"}}>{filtered.filter(t=>t.done).length}/{filtered.length} done</span>
+                      <span style={{fontSize:11,color:"#bbb",marginLeft:"auto"}}>{filtered.filter(t=>t.done).length}/{filtered.length}</span>
                     </div>
                     {filtered.map((td,i)=>{
                       const tc=TYPE_COLORS[td.taskType]||"#888";
@@ -1162,12 +1186,11 @@ async function clearDay(){
               }).filter(Boolean);
             })()}
           </div>
-          {/* Summary */}
           <div style={{padding:"10px 14px",borderTop:B,flexShrink:0,background:"#fafafa"}}>
             {(()=>{
               const allTodos=Object.keys(allData).flatMap(dk=>getEffectiveTasks(dk).filter(t=>!t._cancelled).flatMap(t=>t.todos||[]));
               const done=allTodos.filter(t=>t.done).length;
-              return <p style={{fontSize:12,color:"#888"}}>{done} of {allTodos.length} todos complete across all days</p>;
+              return <p style={{fontSize:12,color:"#888"}}>{done} of {allTodos.length} todos complete</p>;
             })()}
           </div>
         </div>
