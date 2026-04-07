@@ -330,6 +330,8 @@ function Planner({user}){
     try{ await dbSaveDay(user.id,selected,cleared); }catch(e){}
     setShowClearDay(false);
   }
+
+  async function clearAll(){
     localStorage.removeItem("smart-planner-v4");
     localStorage.removeItem("smart-planner-v4-recurring");
     try{
