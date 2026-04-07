@@ -30,12 +30,10 @@
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 
-// ─── CONFIG — REPLACE THESE ──────────────────────────────────────────────────
-const SUPABASE_URL      = "YOUR_SUPABASE_URL";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-const GOOGLE_CLIENT_ID  = "YOUR_GOOGLE_CLIENT_ID";   // from Google Cloud Console
+const SUPABASE_URL      = "https://wojfppyjesmfrwfrndun.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+const GOOGLE_CLIENT_ID  = "222119709391-mnvb6qffpest6sp28ddqtthqc0guoi01.apps.googleusercontent.com";
 const SITE_URL          = "https://hannahjohnstone.github.io/smart-planner";
-// ─────────────────────────────────────────────────────────────────────────────
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
