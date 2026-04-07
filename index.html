@@ -425,7 +425,7 @@ function Planner({user}){
       updateTasks(dk,dayData(dk).tasks.filter(t=>String(t.id)!==String(id)));
     }
   }
-  function removeRecurring(id){ setRec(recurring.filter(r=>r.id!==id)); }
+  function removeRecurring(id){ setRec(recurring.filter(r=>String(r.id)!==String(id))); }
   function toggleDone(dk,task){
     if(task._recurring){
       const dd=dayData(dk),ex=dd.tasks.find(t=>t.repeatId===task.repeatId);
@@ -842,12 +842,18 @@ function Planner({user}){
                           {task._recurring?(
                             <>
                               <button onClick={()=>removeTask(selected,task.id,true,task.repeatId)} style={{flex:1,padding:"5px",fontSize:11,background:"#FAEEDA",color:"#633806",border:"none",borderRadius:6}}>Remove today only</button>
-                              <button onClick={()=>{removeRecurring(task.repeatId);}} style={{flex:1,padding:"5px",fontSize:11,background:"#FCEBEB",color:"#A32D2D",border:"none",borderRadius:6}}>Delete all repeats</button>
+                              <button onClick={()=>removeRecurring(String(task.repeatId))} style={{flex:1,padding:"5px",fontSize:11,background:"#FCEBEB",color:"#A32D2D",border:"none",borderRadius:6}}>Delete all repeats</button>
                             </>
                           ):(
                             <button onClick={()=>removeTask(selected,task.id,false,null)} style={{flex:1,padding:"5px",fontSize:11,background:"#FCEBEB",color:"#A32D2D",border:"none",borderRadius:6}}>Delete task</button>
                           )}
                         </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
 
             {/* Add area */}
             <div style={{padding:"8px",borderTop:B,flexShrink:0}}>
