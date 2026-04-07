@@ -31,9 +31,9 @@
 <script type="text/babel" data-presets="react">
 
 // ─── CONFIG — REPLACE THESE ──────────────────────────────────────────────────
-const SUPABASE_URL      = "https://wojfppyjesmfrwfrndun.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvamZwcHlqZXNtZnJ3ZnJuZHVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNjg0MjcsImV4cCI6MjA5MDk0NDQyN30._vY9WY4rNS2iMjK08B4tuNFKfIECBF0iFmvT6s-KgiY";
-const GOOGLE_CLIENT_ID  = "222119709391-mnvb6qffpest6sp28ddqtthqc0guoi01.apps.googleusercontent.com ";   // from Google Cloud Console
+const SUPABASE_URL      = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const GOOGLE_CLIENT_ID  = "YOUR_GOOGLE_CLIENT_ID";   // from Google Cloud Console
 const SITE_URL          = "https://hannahjohnstone.github.io/smart-planner";
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -268,6 +268,59 @@ function Planner({user}){
   const [todoTagFilter,setTodoTagFilter]=useState(null);
   const [tagPickerOpen,setTagPickerOpen]=useState(null);
   const [showClearConfirm,setShowClearConfirm]=useState(false);
+  const [showCopyDay,setShowCopyDay]=useState(false);
+  const [copyTarget,setCopyTarget]=useState("");
+  const [showTimetable,setShowTimetable]=useState(false);
+  const [timetableSlots,setTimetableSlots]=useState(
+    DOW.slice(0,5).map(d=>({day:d,slots:[]}))
+  );
+
+  function copyDayTo(sourceDk, targetDk){
+    if(!targetDk||targetDk===sourceDk) return;
+    const sourceTasks=dayData(sourceDk).tasks||[];
+    const targetDd=dayData(targetDk);
+    // Give copied tasks new IDs to avoid conflicts
+    const copied=sourceTasks.map(t=>({...t,id:Date.now()+Math.random(),repeatId:null,_recurring:false}));
+    setDayData(targetDk,{...targetDd,tasks:[...(targetDd.tasks||[]),...copied]});
+    setShowCopyDay(false); setCopyTarget("");
+  }
+
+  function applyTimetable(startDk){
+    // Apply timetable slots as recurring tasks for current week onwards
+    const newRec=[...recurring];
+    timetableSlots.forEach(({day,slots})=>{
+      const dowIdx=DOW.indexOf(day);
+      slots.forEach(slot=>{
+        if(!slot.name.trim()) return;
+        newRec.push({
+          id:Date.now()+Math.random(),
+          name:slot.name,
+          startTime:slot.startTime||"09:00",
+          duration:Number(slot.duration)||60,
+          types:[slot.type||"class"],
+          priority:"medium",
+          repeat:"custom",
+          repeatDays:[dowIdx],
+          repeatStart:startDk,
+          repeatEnd:slot.endDate||"",
+          done:false,note:"",todos:[],
+          reminder:"none",startDate:startDk,
+        });
+      });
+    });
+    setRec(newRec);
+    setShowTimetable(false);
+  }
+
+  function addTimetableSlot(dayIdx){
+    setTimetableSlots(prev=>prev.map((d,i)=>i===dayIdx?{...d,slots:[...d.slots,{name:"",startTime:"09:00",duration:60,type:"class",endDate:""}]}:d));
+  }
+  function removeTimetableSlot(dayIdx,slotIdx){
+    setTimetableSlots(prev=>prev.map((d,i)=>i===dayIdx?{...d,slots:d.slots.filter((_,si)=>si!==slotIdx)}:d));
+  }
+  function updateTimetableSlot(dayIdx,slotIdx,field,val){
+    setTimetableSlots(prev=>prev.map((d,i)=>i===dayIdx?{...d,slots:d.slots.map((s,si)=>si===slotIdx?{...s,[field]:val}:s)}:d));
+  }
 
   async function clearAll(){
     localStorage.removeItem("smart-planner-v4");
@@ -511,6 +564,8 @@ function Planner({user}){
           {["week","day"].map(vw=>(
             <button key={vw} onClick={()=>setView(vw)} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:view===vw?"1.5px solid #7F77DD":B,background:view===vw?"#EEEDFE":"none",color:view===vw?"#3C3489":"#666"}}>{vw}</button>
           ))}
+          <button onClick={()=>setShowCopyDay(p=>!p)} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:showCopyDay?"1.5px solid #185FA5":B,background:showCopyDay?"#E6F1FB":"none",color:showCopyDay?"#185FA5":"#666"}}>Copy day</button>
+          <button onClick={()=>setShowTimetable(p=>!p)} style={{fontSize:11,padding:"3px 9px",borderRadius:6,border:showTimetable?"1.5px solid #1D9E75":B,background:showTimetable?"#E1F5EE":"none",color:showTimetable?"#0F6E56":"#666"}}>Timetable</button>
           <button onClick={()=>setShowClearConfirm(true)} style={{fontSize:11,padding:"3px 8px",borderRadius:6,border:"1px solid #f0c0c0",background:"none",color:"#A32D2D"}}>Clear diary</button>
           <button onClick={()=>sb.auth.signOut()} style={{fontSize:11,padding:"3px 8px",borderRadius:6,border:B,background:"none",color:"#bbb"}}>Sign out</button>
         </div>
@@ -719,8 +774,7 @@ function Planner({user}){
                         <p style={{fontSize:10,color:"#bbb",marginTop:1}}>{minsToTime(task._s)}–{minsToTime(task._e)} · {fmtDur(task.duration)}</p>
                         {totalTodos>0&&<p style={{fontSize:10,color:"#bbb",marginTop:1}}>{doneTodos}/{totalTodos} todos</p>}
                       </div>
-                      <button onClick={()=>removeTask(selected,task.id,task._recurring,task.repeatId)} style={{fontSize:13,color:"#ccc",background:"none",border:"none",padding:"0 2px",flexShrink:0}}>×</button>
-                    </div>
+                      <button title={task._recurring?"Remove from today":"Delete task"} onClick={()=>removeTask(selected,task.id,task._recurring,task.repeatId)} style={{fontSize:13,color:"#ccc",background:"none",border:"none",padding:"0 2px",flexShrink:0}}>×</button>                    </div>
                     {isExp&&(
                       <div style={{padding:"0 8px 8px",borderTop:"1px solid #f5f5f5"}}>
                         {/* Editable name */}
@@ -783,12 +837,17 @@ function Planner({user}){
                             style={{flex:1,fontSize:12,padding:"3px 6px"}}/>
                           <button onClick={()=>{addTodoItem(selected,task,todoInput[task.id]||"");setTodoInput(p=>({...p,[task.id]:""}));}} style={{fontSize:12,padding:"3px 8px",background:"#EEEDFE",color:"#3C3489",border:"none",borderRadius:6}}>+</button>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                        {/* Delete options */}
+                        <div style={{display:"flex",gap:6,marginTop:10,paddingTop:8,borderTop:"1px solid #f5f5f5"}}>
+                          {task._recurring?(
+                            <>
+                              <button onClick={()=>removeTask(selected,task.id,true,task.repeatId)} style={{flex:1,padding:"5px",fontSize:11,background:"#FAEEDA",color:"#633806",border:"none",borderRadius:6}}>Remove today only</button>
+                              <button onClick={()=>{removeRecurring(task.repeatId);}} style={{flex:1,padding:"5px",fontSize:11,background:"#FCEBEB",color:"#A32D2D",border:"none",borderRadius:6}}>Delete all repeats</button>
+                            </>
+                          ):(
+                            <button onClick={()=>removeTask(selected,task.id,false,null)} style={{flex:1,padding:"5px",fontSize:11,background:"#FCEBEB",color:"#A32D2D",border:"none",borderRadius:6}}>Delete task</button>
+                          )}
+                        </div>
 
             {/* Add area */}
             <div style={{padding:"8px",borderTop:B,flexShrink:0}}>
@@ -834,8 +893,14 @@ function Planner({user}){
               ):(
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>setShowAdd(true)} style={{flex:1,padding:"6px",fontSize:12,fontWeight:500,background:"#EEEDFE",color:"#3C3489",border:"none",borderRadius:6}}>+ Task</button>
-                  <button onClick={()=>addQuick(selected,"break","Break",15)} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Break</button>
-                  <button onClick={()=>addQuick(selected,"meal","Meal",30)} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Meal</button>
+                  <button onClick={()=>{
+                    const now=new Date(); const st=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+                    updateTasks(selected,[...dayData(selected).tasks,{id:Date.now(),name:"Break",duration:15,priority:"low",types:["break"],done:false,note:"",todos:[],startTime:st,repeat:"none",repeatId:null}]);
+                  }} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Break</button>
+                  <button onClick={()=>{
+                    const now=new Date(); const st=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+                    updateTasks(selected,[...dayData(selected).tasks,{id:Date.now(),name:"Meal",duration:30,priority:"low",types:["meal"],done:false,note:"",todos:[],startTime:st,repeat:"none",repeatId:null}]);
+                  }} style={{padding:"6px 8px",fontSize:12,background:"none",border:B,borderRadius:6,color:"#888"}}>Meal</button>
                 </div>
               )}
             </div>
@@ -890,6 +955,80 @@ function Planner({user}){
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* COPY DAY PANEL */}
+      {showCopyDay&&(
+        <div style={{position:"fixed",inset:0,background:"#00000033",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+          <div style={{background:"#fff",borderRadius:12,padding:"24px",maxWidth:340,width:"100%",border:B}}>
+            <p style={{fontSize:15,fontWeight:500,marginBottom:6}}>Copy day</p>
+            <p style={{fontSize:12,color:"#888",marginBottom:16}}>Copy all tasks from <strong>{fmtDay(selected).short} {fmtDay(selected).num} {fmtDay(selected).month}</strong> to another day.</p>
+            <label style={{fontSize:11,color:"#bbb",display:"block",marginBottom:4}}>Copy to date</label>
+            <input type="date" value={copyTarget} onChange={e=>setCopyTarget(e.target.value)} style={{width:"100%",fontSize:13,marginBottom:16}}/>
+            <p style={{fontSize:11,color:"#bbb",marginBottom:16}}>Existing tasks on the target day will be kept — copied tasks are added on top.</p>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{setShowCopyDay(false);setCopyTarget("");}} style={{flex:1,padding:"8px",fontSize:13,background:"none",border:B,borderRadius:6,color:"#666"}}>Cancel</button>
+              <button onClick={()=>copyDayTo(selected,copyTarget)} disabled={!copyTarget} style={{flex:1,padding:"8px",fontSize:13,fontWeight:500,background:"#E6F1FB",color:"#185FA5",border:"none",borderRadius:6,opacity:copyTarget?1:0.4}}>Copy tasks</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TIMETABLE BUILDER */}
+      {showTimetable&&(
+        <div style={{position:"fixed",inset:0,background:"#00000033",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflowY:"auto"}}>
+          <div style={{background:"#fff",borderRadius:12,padding:"20px",maxWidth:600,width:"100%",border:B,maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+              <p style={{fontSize:15,fontWeight:500}}>Teaching timetable</p>
+              <button onClick={()=>setShowTimetable(false)} style={{fontSize:18,color:"#bbb",background:"none",border:"none"}}>×</button>
+            </div>
+            <p style={{fontSize:12,color:"#888",marginBottom:16}}>Add your recurring weekly slots. Each will be saved as a recurring event.</p>
+            {timetableSlots.map(({day,slots},dayIdx)=>(
+              <div key={day} style={{marginBottom:16}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                  <p style={{fontSize:12,fontWeight:500,color:"#1a1a1a"}}>{day}</p>
+                  <button onClick={()=>addTimetableSlot(dayIdx)} style={{fontSize:11,padding:"2px 8px",borderRadius:6,border:"1px solid #1D9E75",background:"#E1F5EE",color:"#0F6E56"}}>+ Add slot</button>
+                </div>
+                {slots.length===0&&<p style={{fontSize:11,color:"#ccc",marginBottom:4}}>No slots — click Add slot</p>}
+                {slots.map((slot,slotIdx)=>(
+                  <div key={slotIdx} style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:8,padding:"8px",background:"#fafafa",borderRadius:6,border:G,flexWrap:"wrap"}}>
+                    <div style={{flex:"2 1 120px"}}>
+                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Name</label>
+                      <input value={slot.name} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"name",e.target.value)} placeholder="e.g. Lecture" style={{width:"100%",fontSize:12}}/>
+                    </div>
+                    <div style={{flex:"1 1 80px"}}>
+                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Start</label>
+                      <input type="time" value={slot.startTime} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"startTime",e.target.value)} style={{width:"100%",fontSize:12}}/>
+                    </div>
+                    <div style={{flex:"1 1 60px"}}>
+                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Mins</label>
+                      <input type="number" min={15} step={15} value={slot.duration} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"duration",e.target.value)} style={{width:"100%",fontSize:12}}/>
+                    </div>
+                    <div style={{flex:"1 1 80px"}}>
+                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>Type</label>
+                      <select value={slot.type} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"type",e.target.value)} style={{width:"100%",fontSize:12,padding:"3px 4px"}}>
+                        {TYPES.map(ty=><option key={ty} value={ty}>{ty}</option>)}
+                      </select>
+                    </div>
+                    <div style={{flex:"1 1 100px"}}>
+                      <label style={{fontSize:10,color:"#bbb",display:"block",marginBottom:2}}>End date</label>
+                      <input type="date" value={slot.endDate} onChange={e=>updateTimetableSlot(dayIdx,slotIdx,"endDate",e.target.value)} style={{width:"100%",fontSize:11}}/>
+                    </div>
+                    <button onClick={()=>removeTimetableSlot(dayIdx,slotIdx)} style={{fontSize:14,color:"#ccc",background:"none",border:"none",alignSelf:"flex-end",padding:"4px"}}>×</button>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div style={{borderTop:B,paddingTop:14,marginTop:4}}>
+              <label style={{fontSize:11,color:"#bbb",display:"block",marginBottom:4}}>Apply from week starting</label>
+              <input type="date" defaultValue={weekDays[0]} id="timetable-start" style={{fontSize:12,marginBottom:14}}/>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setShowTimetable(false)} style={{flex:1,padding:"8px",fontSize:13,background:"none",border:B,borderRadius:6,color:"#666"}}>Cancel</button>
+                <button onClick={()=>applyTimetable(document.getElementById("timetable-start").value||weekDays[0])} style={{flex:1,padding:"8px",fontSize:13,fontWeight:500,background:"#E1F5EE",color:"#0F6E56",border:"none",borderRadius:6}}>Save timetable</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
