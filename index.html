@@ -6,6 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="Smart Planner"/>
+<link rel="manifest" href="/smart-planner/manifest.json" />
+<meta name="theme-color" content="#7F77DD" />
+<link rel="apple-touch-icon" href="/smart-planner/icons/icon-192.png" />
 <title>Smart Planner</title>
 <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -1214,6 +1217,13 @@ function Root(){
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+ <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/smart-planner/sw.js');
+    });
+  }
 </script>
 </body>
 </html>
